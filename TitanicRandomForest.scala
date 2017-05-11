@@ -19,17 +19,12 @@ val cleandata = data.drop("Cabin").
   
 cleandata.describe().filter($"summary" === "count").show
   
-val Array(trainData, testData) = cleandata.randomSplit(Array(0.9, 0.1), seed=1234L)
+val Array(trainData, testData) = cleandata.randomSplit(Array(0.8, 0.2), seed=1L)
 trainData.cache()
 testData.cache()
 
   
-import org.apache.spark.ml.feature.StringIndexer
-val pclassIndexer = new StringIndexer().
-  setInputCol("Pclass").
-  setOutputCol("PclassIndex").
-  fit(cleandata)
-  
+import org.apache.spark.ml.feature.StringIndexer  
 val sexIndexer = new StringIndexer().
   setInputCol("Sex").
   setOutputCol("SexIndex").
@@ -37,7 +32,7 @@ val sexIndexer = new StringIndexer().
   
   
 import org.apache.spark.ml.feature.VectorAssembler
-val inputCols = Array("PclassIndex", "SexIndex", "Age","SibSp", "Parch", "Fare")
+val inputCols = Array("Pclass", "SexIndex", "Age","SibSp", "Parch", "Fare")
 val assembler = new VectorAssembler().
   setInputCols(inputCols).
   setOutputCol("features")
@@ -49,22 +44,21 @@ val vectorIndexer = new VectorIndexer().
   setOutputCol("IndexedFeatures").
   setMaxCategories(3)
   
+/*
+# Using RandomForest instead of DecisionTree
 
-import org.apache.spark.ml.classification.{DecisionTreeClassificationModel, RandomForestClassificationModel}
-import org.apache.spark.ml.classification.{DecisionTreeClassifier, RandomForestClassifier}
-import scala.util.Random
-/*val classifier = new DecisionTreeClassifier().
-  setSeed(Random.nextLong()).
-  setLabelCol("Survived").
-  setFeaturesCol("IndexedFeatures").
-  setPredictionCol("Prediction")*/
+*/
   
+import org.apache.spark.ml.classification.RandomForestClassificationModel
+import org.apache.spark.ml.classification.RandomForestClassifier
+import scala.util.Random
+
 val classifier = new RandomForestClassifier().
   setSeed(1L).
   setLabelCol("Survived").
   setFeaturesCol("IndexedFeatures").
-  setPredictionCol("Prediction").
-  setNumTrees(10)  
+  setPredictionCol("Prediction")
+
 
 import org.apache.spark.ml.evaluation.MulticlassClassificationEvaluator  
 // Select (prediction, true label) and compute test error.
@@ -76,21 +70,8 @@ val evaluator = new MulticlassClassificationEvaluator().
   
 import org.apache.spark.ml.{Pipeline, PipelineModel}
 
-val pipeline = new Pipeline().setStages(Array(pclassIndexer,sexIndexer, assembler, vectorIndexer, classifier))
-val model = pipeline.fit(trainData)
-val trainPredictions = model.transform(trainData)
-val testPredictions = model.transform(testData)  
-  
-  
-val trainAccuracy = evaluator.evaluate(trainPredictions)
-println("Train Data Accuracy = " + trainAccuracy)  
-  
-val testAccuracy = evaluator.evaluate(testPredictions)
-println("Test Data Accuracy = " + testAccuracy) 
+val pipeline = new Pipeline().setStages(Array(sexIndexer, assembler, vectorIndexer, classifier))
 
-val dtModel = model.stages.last.asInstanceOf[RandomForestClassificationModel]  
-println(dtModel.toDebugString)
-println(dtModel.extractParamMap)
 
 /*
 # Choose the best hyperparameters using validation set
@@ -98,10 +79,9 @@ println(dtModel.extractParamMap)
 import org.apache.spark.ml.tuning.{ParamGridBuilder, CrossValidator, TrainValidationSplit}
 
 val paramGrid = new ParamGridBuilder().
-  addGrid(classifier.maxDepth, Array(5, 6, 7)).
-  addGrid(classifier.maxBins, Array(32, 64)).
+  addGrid(classifier.maxDepth, Array(5,7,9)).
   addGrid(classifier.impurity, Array("gini", "entropy")).
-  addGrid(classifier.minInfoGain, Array(0.0, 0.05)).
+  addGrid(classifier.numTrees, Array(5,10)).
   build()
 
 val trainValidationSplit = new TrainValidationSplit().
@@ -109,24 +89,19 @@ val trainValidationSplit = new TrainValidationSplit().
   setEstimator(pipeline).
   setEvaluator(evaluator).
   setEstimatorParamMaps(paramGrid).
-  setTrainRatio(0.9)
+  setTrainRatio(0.8)
   
 val validatorModel = trainValidationSplit.fit(trainData)
 val bestModel = validatorModel.bestModel  
 println(bestModel.asInstanceOf[PipelineModel].stages.last.extractParamMap)
 
-evaluator.evaluate(bestModel.transform(trainData))
-evaluator.evaluate(bestModel.transform(testData))  
+val trainPrediction = bestModel.transform(trainData)
   
-val crossValidator = new CrossValidator().
-  //setSeed(1L).
-  setEstimator(pipeline).
-  setEvaluator(evaluator).
-  setEstimatorParamMaps(paramGrid).
-  setNumFolds(10)   
-
-val crossValidatorModel = crossValidator.fit(trainData) 
-val cvBestModel = crossValidatorModel.bestModel
-println(cvBestModel.asInstanceOf[PipelineModel].stages.last.extractParamMap)
-evaluator.evaluate(cvBestModel.transform(trainData))
-evaluator.evaluate(cvBestModel.transform(testData))    
+val trainAccuracy = evaluator.evaluate(trainPrediction)
+println("Train Data Accuracy = " + trainAccuracy)  
+  
+val testPrediction = bestModel.transform(testData)
+  
+val testAccuracy = evaluator.evaluate(testPrediction)  
+println("Test Data Accuracy = " + testAccuracy)  
+  

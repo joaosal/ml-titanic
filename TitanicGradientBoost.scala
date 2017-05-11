@@ -19,25 +19,18 @@ val cleandata = data.drop("Cabin").
   
 cleandata.describe().filter($"summary" === "count").show
   
-val Array(trainData, testData) = cleandata.randomSplit(Array(0.8, 0.2), seed=1234L)
+val Array(trainData, testData) = cleandata.randomSplit(Array(0.8, 0.2), seed=1L)
 trainData.cache()
 testData.cache()
-
   
-import org.apache.spark.ml.feature.StringIndexer
-val pclassIndexer = new StringIndexer().
-  setInputCol("Pclass").
-  setOutputCol("PclassIndex").
-  fit(cleandata)
   
 val sexIndexer = new StringIndexer().
   setInputCol("Sex").
-  setOutputCol("SexIndex").
-  fit(cleandata)
+  setOutputCol("SexIndex")
   
   
 import org.apache.spark.ml.feature.VectorAssembler
-val inputCols = Array("PclassIndex", "SexIndex", "Age","SibSp", "Parch", "Fare")
+val inputCols = Array("Pclass", "SexIndex", "Age","SibSp", "Parch", "Fare")
 val assembler = new VectorAssembler().
   setInputCols(inputCols).
   setOutputCol("features")
@@ -60,35 +53,21 @@ val classifier = new GBTClassifier().
   setLabelCol("Survived").
   setFeaturesCol("IndexedFeatures").
   setPredictionCol("Prediction")
-//  setMaxIter(10)
+
+
 
 import org.apache.spark.ml.evaluation.MulticlassClassificationEvaluator  
-// Select (prediction, true label) and compute test error.
 val evaluator = new MulticlassClassificationEvaluator().
   setLabelCol("Survived").
   setPredictionCol("Prediction").
   setMetricName("accuracy")
 
 
-
   
 import org.apache.spark.ml.{Pipeline, PipelineModel}
 
 val pipeline = new Pipeline().setStages(Array(pclassIndexer,sexIndexer, assembler, vectorIndexer, classifier))
-val model = pipeline.fit(trainData)
-val trainPredictions = model.transform(trainData)
-val testPredictions = model.transform(testData)  
-  
-  
-val trainAccuracy = evaluator.evaluate(trainPredictions)
-println("Train Data Accuracy = " + trainAccuracy)  
-  
-val testAccuracy = evaluator.evaluate(testPredictions)
-println("Test Data Accuracy = " + testAccuracy) 
 
-val dtModel = model.stages.last
-//println(dtModel.toDebugString)
-println(dtModel.extractParamMap)
 
 /*
 # Choose the best hyperparameters using validation set
@@ -96,15 +75,11 @@ println(dtModel.extractParamMap)
 import org.apache.spark.ml.tuning.{ParamGridBuilder, CrossValidator, TrainValidationSplit}
 
 val paramGrid = new ParamGridBuilder().
-//  addGrid(classifier.maxDepth, Array(5, 6, 7)).
-//  addGrid(classifier.maxBins, Array(32, 64)).
-//  addGrid(classifier.impurity, Array("gini", "entropy")).
-//  addGrid(classifier.minInfoGain, Array(0.0, 0.05)).
-  addGrid(classifier.maxIter, Array(3,5,10)).
+  addGrid(classifier.maxIter, Array(10, 25)).
+  addGrid(classifier.maxDepth, Array(2,5)).
   build()
 
 val trainValidationSplit = new TrainValidationSplit().
-  //setSeed(Random.nextLong()).
   setEstimator(pipeline).
   setEvaluator(evaluator).
   setEstimatorParamMaps(paramGrid).
@@ -114,18 +89,13 @@ val validatorModel = trainValidationSplit.fit(trainData)
 val bestModel = validatorModel.bestModel  
 println(bestModel.asInstanceOf[PipelineModel].stages.last.extractParamMap)
 
-evaluator.evaluate(bestModel.transform(trainData))
-evaluator.evaluate(bestModel.transform(testData))  
   
-/*val crossValidator = new CrossValidator().
-  //setSeed(1L).
-  setEstimator(pipeline).
-  setEvaluator(evaluator).
-  setEstimatorParamMaps(paramGrid).
-  setNumFolds(10)   
-
-val crossValidatorModel = crossValidator.fit(trainData) 
-val cvBestModel = crossValidatorModel.bestModel
-println(cvBestModel.asInstanceOf[PipelineModel].stages.last.extractParamMap)
-evaluator.evaluate(cvBestModel.transform(trainData))
-evaluator.evaluate(cvBestModel.transform(testData))    */
+val trainPredictions = bestModel.transform(trainData)
+val testPredictions = bestModel.transform(testData)  
+  
+  
+val trainAccuracy = evaluator.evaluate(trainPredictions)
+println("Train Data Accuracy = " + trainAccuracy)  
+  
+val testAccuracy = evaluator.evaluate(testPredictions)
+println("Test Data Accuracy = " + testAccuracy) 

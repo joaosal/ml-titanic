@@ -48,7 +48,6 @@ import org.apache.spark.sql.functions._
 val cleandata = data.drop("Cabin").
   drop("Embarked").
   filter($"Age".isNotNull)
- // withColumn("FareSquare", $"Fare"*$"Fare")
   
 cleandata.describe().filter($"summary" === "count").show
   
@@ -74,29 +73,15 @@ val inputCols = Array("PclassVector", "SexIndex", "Age","SibSp", "Parch", "Fare"
 val assembler = new VectorAssembler().
   setInputCols(inputCols).
   setOutputCol("features")
-  
-import org.apache.spark.ml.feature.StandardScaler
-
-val scaler = new StandardScaler().
-  setInputCol("features").
-  setOutputCol("scaledFeatures").
-  setWithStd(true).
-  setWithMean(true)  
-
-/*  
-import org.apache.spark.ml.feature.VectorIndexer
-val vectorIndexer = new VectorIndexer().
-  setInputCol("features").
-  setOutputCol("IndexedFeatures").
-  setMaxCategories(3)*/
-  
+   
 
 import org.apache.spark.ml.classification.{LogisticRegression,LogisticRegressionModel}
 import scala.util.Random
 val classifier = new LogisticRegression().
   setLabelCol("Survived").
-  setFeaturesCol("scaledFeatures").
-  setPredictionCol("Prediction")
+  setFeaturesCol("features").
+  setPredictionCol("Prediction").
+  setMaxIter(100)
   
   
 
@@ -110,20 +95,8 @@ val evaluator = new MulticlassClassificationEvaluator().
   
 import org.apache.spark.ml.{Pipeline, PipelineModel}
 
-val pipeline = new Pipeline().setStages(Array(pclassOneHotEncoder,sexIndexer, assembler, scaler, classifier))
-val model = pipeline.fit(trainData)
-val trainPredictions = model.transform(trainData)
-val testPredictions = model.transform(testData)  
-  
-  
-val trainAccuracy = evaluator.evaluate(trainPredictions)
-println("Train Data Accuracy = " + trainAccuracy)  
-  
-val testAccuracy = evaluator.evaluate(testPredictions)
-println("Test Data Accuracy = " + testAccuracy) 
+val pipeline = new Pipeline().setStages(Array(pclassOneHotEncoder,sexIndexer, assembler,  classifier))
 
-val lrmodel = model.stages.last.asInstanceOf[LogisticRegressionModel]  
-println(lrmodel.extractParamMap)
 
 /*
 # Choose the best hyperparameters using validation set
@@ -131,13 +104,11 @@ println(lrmodel.extractParamMap)
 import org.apache.spark.ml.tuning.{ParamGridBuilder, CrossValidator, TrainValidationSplit}
 
 val paramGrid = new ParamGridBuilder().
-  addGrid(classifier.maxIter, Array(10, 50, 100)).
   addGrid(classifier.regParam, Array(0.0, 0.01, 0.1)).
   addGrid(classifier.elasticNetParam, Array(0.0, 0.5, 1.0)).
   build()
 
 val trainValidationSplit = new TrainValidationSplit().
-  //setSeed(Random.nextLong()).
   setEstimator(pipeline).
   setEvaluator(evaluator).
   setEstimatorParamMaps(paramGrid).
@@ -152,10 +123,17 @@ println(s"Coefficients: ${bestLRModel.coefficients} Intercept: ${bestLRModel.int
 
 val trainPredictions =  bestModel.transform(trainData)
 val testPredictions = bestModel.transform(testData) 
-evaluator.evaluate(trainPredictions)
-evaluator.evaluate(testPredictions)
+  
+val trainAccuracy = evaluator.evaluate(trainPredictions)
+println("Train Data Accuracy = " + trainAccuracy)  
+  
+val testAccuracy = evaluator.evaluate(testPredictions)
+println("Test Data Accuracy = " + testAccuracy) 
 
-testPredictions.filter($"Survived"!==$"Prediction").show(truncate=false)
+
+testPredictions.filter($"Survived"!==$"Prediction").
+  select("Name","Age", "Sex","Pclass","Survived", "Prediction", "probability").
+  show(truncate=false)
   
   
   

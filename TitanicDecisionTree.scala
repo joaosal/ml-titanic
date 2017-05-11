@@ -50,22 +50,20 @@ val cleandata = data.drop("Cabin").
   filter($"Age".isNotNull)
   
 cleandata.describe().filter($"summary" === "count").show
+
+/*
+# Splitting Data for both training and testing. Cache both dataset for performance
+*/
   
-val Array(trainData, testData) = cleandata.randomSplit(Array(0.9, 0.1), seed=1234L)
+val Array(trainData, testData) = cleandata.randomSplit(Array(0.8, 0.2), seed=1L)
 trainData.cache()
 testData.cache()
 
-  
-/*import org.apache.spark.ml.feature.StringIndexer
-val pclassIndexer = new StringIndexer().
-  setInputCol("Pclass").
-  setOutputCol("PclassIndex").
-  fit(cleandata)*/
+
 import org.apache.spark.ml.feature.StringIndexer  
 val sexIndexer = new StringIndexer().
   setInputCol("Sex").
   setOutputCol("SexIndex")
-
   
   
 import org.apache.spark.ml.feature.VectorAssembler
@@ -86,10 +84,13 @@ import org.apache.spark.ml.classification.DecisionTreeClassificationModel
 import org.apache.spark.ml.classification.DecisionTreeClassifier
 import scala.util.Random
 val classifier = new DecisionTreeClassifier().
-  setSeed(Random.nextLong()).
+  setSeed(1L).
   setLabelCol("Survived").
   setFeaturesCol("IndexedFeatures").
-  setPredictionCol("Prediction")
+  setPredictionCol("Prediction").
+  setMaxDepth(9).
+  setMaxBins(100).
+  setImpurity("gini")
   
 
 import org.apache.spark.ml.evaluation.MulticlassClassificationEvaluator  
@@ -115,7 +116,7 @@ val testAccuracy = evaluator.evaluate(testPredictions)
 println("Test Data Accuracy = " + testAccuracy) 
 
 val dtModel = model.stages.last.asInstanceOf[DecisionTreeClassificationModel]  
-//println(dtModel.toDebugString)
+println(dtModel.toDebugString)
 println(dtModel.extractParamMap)
 
 /*
@@ -124,44 +125,34 @@ println(dtModel.extractParamMap)
 import org.apache.spark.ml.tuning.{ParamGridBuilder, CrossValidator, TrainValidationSplit}
 import org.apache.spark.ml.feature.VectorIndexerModel
 val paramGrid = new ParamGridBuilder().
-  addGrid(classifier.maxDepth, Array(5, 6, 7)).
-  addGrid(classifier.maxBins, Array(32, 64)).
+  addGrid(classifier.maxDepth, Array(5,7,9)).
+  //addGrid(classifier.maxBins, Array(20, 50, 100)).
   addGrid(classifier.impurity, Array("gini", "entropy")).
-  addGrid(classifier.minInfoGain, Array(0.0, 0.05)).
   build()
 
 val trainValidationSplit = new TrainValidationSplit().
-  //setSeed(Random.nextLong()).
+  setSeed(1L).
   setEstimator(pipeline).
   setEvaluator(evaluator).
   setEstimatorParamMaps(paramGrid).
-  setTrainRatio(0.9)
+  setTrainRatio(0.8)
   
 val validatorModel = trainValidationSplit.fit(trainData)
 val bestModel = validatorModel.bestModel  
 println(bestModel.asInstanceOf[PipelineModel].stages.last.extractParamMap)
 val myVectorIndexer = bestModel.asInstanceOf[PipelineModel].stages(2).asInstanceOf[VectorIndexerModel]
 
-val categoricalFeatures: Set[Int] = myVectorIndexer.categoryMaps.keys.toSet
-println(s"Chose ${categoricalFeatures.size} categorical features: " +
-  categoricalFeatures.mkString(", "))
-  
-  
+ 
 val bestDTModel = bestModel.asInstanceOf[PipelineModel].stages.last.asInstanceOf[DecisionTreeClassificationModel]  
 bestDTModel.featureImportances.toArray.zip(inputCols).sorted.reverse.foreach(println) 
 
-evaluator.evaluate(bestModel.transform(trainData))
-evaluator.evaluate(bestModel.transform(testData))  
   
-/*val crossValidator = new CrossValidator().
-  //setSeed(1L).
-  setEstimator(pipeline).
-  setEvaluator(evaluator).
-  setEstimatorParamMaps(paramGrid).
-  setNumFolds(10)   
+val trainAccuracy = evaluator.evaluate(bestModel.transform(trainData))
+println("Train Data Accuracy = " + trainAccuracy)  
+  
+val testAccuracy = evaluator.evaluate(bestModel.transform(testData))  
+println("Test Data Accuracy = " + testAccuracy) 
 
-val crossValidatorModel = crossValidator.fit(trainData) 
-val cvBestModel = crossValidatorModel.bestModel
-println(cvBestModel.asInstanceOf[PipelineModel].stages.last.extractParamMap)
-evaluator.evaluate(cvBestModel.transform(trainData))
-evaluator.evaluate(cvBestModel.transform(testData)) */   
+
+  
+  
